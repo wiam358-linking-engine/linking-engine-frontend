@@ -39,6 +39,7 @@ export default {
       // canvas is not a button.
       primary: token("primary"),
       "primary-active": token("primary-active"),
+      "notification-unread": token("notification-unread"),
 
       // Text
       ink: token("ink"),
@@ -146,6 +147,7 @@ export default {
     extend: {
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)"],
         // Waldenburg is licensed; EB Garamond is the substitute the design
         // system documents.
         serif: ["'EB Garamond'", "Georgia", "serif"],
@@ -184,9 +186,7 @@ export default {
         // The 4px-multiple scale is already Tailwind's. These named dashboard
         // geometry values keep the queue and chart widths from becoming
         // unreviewable arbitrary classes.
-        // Wide enough for the "Final rank #N" line that sits above the score.
         score: "96px",
-        "score-wide": "120px",
         meter: "3px",
         filter: "16rem",
         decision: "220px",

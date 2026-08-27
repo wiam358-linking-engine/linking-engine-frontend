@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import Notice from "../components/Notice";
 import type { NoticeState } from "../components/Notice";
@@ -21,10 +21,8 @@ import SuggestionCard from "../components/suggestions/SuggestionCard";
 import SuggestionGroup from "../components/suggestions/SuggestionGroup";
 import SuggestionPreview from "../components/suggestions/SuggestionPreview";
 import RejectionReasonDialog from "../components/suggestions/RejectionReasonDialog";
-import SelectionTray from "../components/suggestions/SelectionTray";
 import FlowSteps from "../components/publish/FlowSteps";
 import { useIncrementalList } from "../hooks/useIncrementalList";
-import { usePendingPublication } from "../hooks/usePublish";
 import {
   useBulkReview,
   useFilteredBulkReview,
@@ -140,7 +138,9 @@ const resolveCounts = (
     const status = overrides[suggestion.id];
     if (!status || status === suggestion.status) return;
     if (filters.siteId !== undefined && suggestion.site_id !== filters.siteId) return;
-    const percent = scorePercent(suggestion.score);
+    // The same column the API filters on, or a locally-decided row would be
+    // counted into a band the server would not have matched it to.
+    const percent = scorePercent(suggestion.rank_score);
     if (filters.minPercent !== undefined && percent < filters.minPercent) return;
     if (filters.maxPercent !== undefined && percent >= filters.maxPercent) return;
 
@@ -152,6 +152,7 @@ const resolveCounts = (
 };
 
 export default function ValidationPage() {
+  const navigate = useNavigate();
   const { filters, setFilters, reset: clearFilters, isFiltered } = useQueueFilters();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -162,8 +163,7 @@ export default function ValidationPage() {
     loadedGroupKey,
     loadedGroupCount,
     rememberLoadedGroups,
-    scrollKey,
-    scrollTop,
+    scrollTopFor,
     rememberScrollTop,
   } = useQueueWorkspace();
   const {
@@ -292,9 +292,6 @@ export default function ValidationPage() {
     { ...scope, maxPercent: threshold },
     bulkCountsWanted,
   );
-  // Read-only here. The queue owns the exact-edit review surface; this query
-  // only tells it which selected site's work is ready to open.
-  const pendingPublicationQuery = usePendingPublication();
   // Only a *stale* answer pauses review: `isPlaceholderData` means these counts
   // still describe the previous filter, so acting on them would act on the
   // wrong rows. A background refetch is not that — reviewing a row invalidates
@@ -321,7 +318,6 @@ export default function ValidationPage() {
     scopedCountsQuery,
     acceptCountsQuery,
     rejectCountsQuery,
-    pendingPublicationQuery,
   ];
   const loading =
     sitesQuery.isPending ||
@@ -333,10 +329,12 @@ export default function ValidationPage() {
     acceptCountsQuery,
     rejectCountsQuery,
   ].some((query) => query.isError);
-  const supportQueryFailed =
-    bulkCountQueryFailed || pendingPublicationQuery.isError;
+  const supportQueryFailed = bulkCountQueryFailed;
   const actionMutationPending = Boolean(
-    review.isPending || bulkReview.isPending || filteredReview.isPending || filteredUndo.isPending,
+    review.isPending ||
+      bulkReview.isPending ||
+      filteredReview.isPending ||
+      filteredUndo.isPending,
   );
   const bulkControlsBlocked =
     failed || queueUpdating || bulkCountQueryFailed || actionMutationPending;
@@ -346,7 +344,6 @@ export default function ValidationPage() {
     void suggestionsQuery.refetch();
     void fleetCountsQuery.refetch();
     void scopedCountsQuery.refetch();
-    void pendingPublicationQuery.refetch();
     if (bulkCountsWanted) {
       void acceptCountsQuery.refetch();
       void rejectCountsQuery.refetch();
@@ -476,8 +473,8 @@ export default function ValidationPage() {
   useEffect(() => {
     const node = queueRegion.current;
     if (!node || loading) return;
-    node.scrollTop = scrollKey === groupListKey ? scrollTop : 0;
-  }, [groupListKey, loading, scrollKey, scrollTop]);
+    node.scrollTop = scrollTopFor(groupListKey);
+  }, [groupListKey, loading, scrollTopFor]);
 
   // Names are looked up per rendered row, so the linear scan is hoisted into a
   // map rather than repeated for every suggestion in the queue.
@@ -489,7 +486,6 @@ export default function ValidationPage() {
     (id: number) => siteNames.get(id) ?? `site ${id}`,
     [siteNames],
   );
-
   // Each of these walks the whole loaded queue. Unmemoised they ran four full
   // passes on every render — including every cursor move — which is what made
   // holding `j` down feel heavy once a few hundred rows were mounted.
@@ -963,13 +959,18 @@ export default function ValidationPage() {
     );
   };
 
-  // Same rule as the counts: reviewing a row invalidates this query, so a
-  // refetch in flight is the normal state after every decision. Only "no answer
-  // yet" and "the answer failed" hide the publish controls.
-  const publicationUnavailable =
-    pendingPublicationQuery.isPending || pendingPublicationQuery.isError;
   const selected =
     resolvedSuggestions.find((suggestion) => suggestion.id === selectedId) ?? null;
+
+  const reviewPublication = useCallback(
+    (id: number) => {
+      const suggestion = resolvedSuggestions.find((item) => item.id === id);
+      if (suggestion) {
+        navigate(`/publish/${suggestion.site_id}?suggestion=${id}`);
+      }
+    },
+    [navigate, resolvedSuggestions],
+  );
 
   // Keyed to the open suggestion, so the queue itself never triggers one:
   // generating a placement runs a model, and a page of rows would run one each.
@@ -1074,22 +1075,24 @@ export default function ValidationPage() {
           </div>
 
           {notice && (
-            <Notice
-              notice={notice}
-              onDismiss={() => setNotice(null)}
-              onUndo={
-                notice.undoOperationId
-                  ? () => undoFiltered(notice.undoOperationId!)
-                  : notice.undoIds
-                    ? () => undo(notice.undoIds!)
-                    : undefined
-              }
-              undoPending={
-                bulkReview.isPending || filteredReview.isPending || filteredUndo.isPending
-              }
-              onRetry={bulkRecovery?.failedIds.length ? retryFailedOnly : undefined}
-              retryPending={bulkReview.isPending}
-            />
+            <div className="w-full">
+              <Notice
+                notice={notice}
+                onDismiss={() => setNotice(null)}
+                onUndo={
+                  notice.undoOperationId
+                    ? () => undoFiltered(notice.undoOperationId!)
+                    : notice.undoIds
+                      ? () => undo(notice.undoIds!)
+                      : undefined
+                }
+                undoPending={
+                  bulkReview.isPending || filteredReview.isPending || filteredUndo.isPending
+                }
+                onRetry={bulkRecovery?.failedIds.length ? retryFailedOnly : undefined}
+                retryPending={bulkReview.isPending}
+              />
+            </div>
           )}
 
           {bulkRecovery && (
@@ -1119,8 +1122,8 @@ export default function ValidationPage() {
               className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-caption text-error-ink"
             >
               <span className="min-w-0 flex-1">
-                Some queue totals or publication status could not be loaded. The current list is
-                still available, but related bulk controls may be paused.
+                Some queue totals could not be loaded. The current list is still available, but
+                bulk controls may be paused.
               </span>
               <button
                 type="button"
@@ -1129,17 +1132,6 @@ export default function ValidationPage() {
               >
                 Retry supporting data
               </button>
-            </div>
-          )}
-
-          {publicationUnavailable && !pendingPublicationQuery.isError && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="mb-3 rounded-lg border border-hairline bg-surface-strong px-4 py-2.5 text-caption text-body"
-            >
-              Loading what is already selected. The link to the exact-edit review appears once it
-              arrives.
             </div>
           )}
 
@@ -1195,6 +1187,7 @@ export default function ValidationPage() {
                           onAccept={acceptRow}
                           onReject={rejectRow}
                           onUndo={undoRow}
+                          onReviewPublication={reviewPublication}
                         />
                       ))}
                     </SuggestionGroup>
@@ -1259,24 +1252,6 @@ export default function ValidationPage() {
 
           </div>
 
-          {!loading && !failed && !publicationUnavailable && (
-            <SelectionTray
-              siteId={siteFilter || undefined}
-              selected={
-                pendingPublicationQuery.totalSelectedSuggestions ??
-                (pendingPublicationQuery.data ?? []).reduce(
-                  (total, site) => total + site.selected_suggestions,
-                  0,
-                )
-              }
-              siteCount={
-                pendingPublicationQuery.totalSites ??
-                (pendingPublicationQuery.data ?? []).filter(
-                  (site) => site.selected_suggestions > 0,
-                ).length
-              }
-            />
-          )}
         </div>
 
         {selected && (
@@ -1302,6 +1277,7 @@ export default function ValidationPage() {
             onAccept={() => decide(selected.id, "approved")}
             onReject={() => requestRejection(selected.id)}
             onUndo={() => undo([selected.id])}
+            onReviewPublication={() => reviewPublication(selected.id)}
           />
         )}
       </div>

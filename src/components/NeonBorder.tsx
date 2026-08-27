@@ -42,12 +42,13 @@ const DEFAULTS = {
 
 const EDGE_COPIES = 2;
 const GLOW_LAYERS = [
-    { blur: 8, opacity: 0.5, reach: 0.3 },
-    { blur: 15, opacity: 0.3, reach: 0.6 },
-    { blur: 57, opacity: 0.18, reach: 1 },
+    { blur: 8, opacity: 0.5, reach: 0.35 },
+    { blur: 15, opacity: 0.22, reach: 1 },
 ];
 const MAX_GLOW_BLUR = Math.max(...GLOW_LAYERS.map((l) => l.blur));
 const MAX_GLOW_REACH = 36;
+const MAX_ANIMATION_FPS = 30;
+const MIN_FRAME_INTERVAL_MS = 1000 / MAX_ANIMATION_FPS;
 
 function withAlpha(input: string, alpha: number) {
     const a = Math.max(0, Math.min(1, alpha));
@@ -235,6 +236,8 @@ export default function NeonBorder(props: Props) {
     }, []);
 
     useEffect(() => {
+        if (speed <= 0) return;
+
         let raf = 0;
         let last = performance.now();
         let lap = 0;
@@ -257,6 +260,11 @@ export default function NeonBorder(props: Props) {
                 document.visibilityState === "hidden" ||
                 live.current.speed <= 0
             ) {
+                return;
+            }
+
+            if (now - last < MIN_FRAME_INTERVAL_MS) {
+                schedule();
                 return;
             }
 

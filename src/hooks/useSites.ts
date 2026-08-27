@@ -13,24 +13,29 @@ import {
   deleteSite,
   getEditorialRankingPolicy,
   getExternalLinkPolicy,
+  getSiteSchedule,
   importArticleRows,
   ingestPoolSourceBatch,
   listPoolAuditEvents,
   listExternalSourceEvaluations,
+  listSiteArticles,
   POOL_AUDIT_PAGE_SIZE,
   listSites,
   setWordPressCredentials,
   SITE_PAGE_SIZE,
   reactivatePoolSource,
   revokePoolSource,
+  runSiteScheduleNow,
   updateExternalLinkPolicy,
   updateEditorialRankingPolicy,
+  updateSiteSchedule,
   validatePoolSources,
 } from "../api/sites";
 import type {
   ArticleImportRow,
   EditorialRankingPolicyUpdate,
   ExternalLinkPolicyUpdate,
+  SiteScheduleUpdate,
 } from "../types/site";
 
 export const useSites = (search = "") =>
@@ -42,6 +47,21 @@ export const useSites = (search = "") =>
       lastPage.length === SITE_PAGE_SIZE ? pages.length * SITE_PAGE_SIZE : undefined,
     select: (data) => data.pages.flat(),
   });
+
+export const useSiteArticles = (siteId: number | null) => {
+  const query = useInfiniteQuery({
+    queryKey: ["sites", siteId, "articles"],
+    queryFn: ({ pageParam }) => listSiteArticles(siteId!, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === SITE_PAGE_SIZE ? pages.length * SITE_PAGE_SIZE : undefined,
+    enabled: siteId !== null,
+  });
+  return {
+    ...query,
+    articles: query.data?.pages.flatMap((page) => page) ?? [],
+  };
+};
 
 const invalidateSiteDependencies = (qc: ReturnType<typeof useQueryClient>) =>
   Promise.all([
@@ -168,6 +188,37 @@ export const usePoolIngestionBatch = () => {
   });
 };
 
+export const useSiteSchedule = (siteId: number | null) =>
+  useQuery({
+    queryKey: ["site-schedule", siteId],
+    queryFn: () => getSiteSchedule(siteId!),
+    enabled: siteId !== null,
+  });
+
+export const useUpdateSiteSchedule = (siteId: number) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (schedule: SiteScheduleUpdate) => updateSiteSchedule({ siteId, schedule }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["site-schedule", siteId] });
+      void qc.invalidateQueries({ queryKey: ["sites"] });
+    },
+  });
+};
+
+export const useRunSiteScheduleNow = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: runSiteScheduleNow,
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["site-schedule"] }),
+        qc.invalidateQueries({ queryKey: ["jobs", "active"] }),
+        qc.invalidateQueries({ queryKey: ["sites"] }),
+      ]),
+  });
+};
+
 export const useExternalLinkPolicy = (siteId: number | null) =>
   useQuery({
     queryKey: ["external-link-policy", siteId],
@@ -189,8 +240,10 @@ export const useUpdateExternalLinkPolicy = (siteId: number) => {
       updateExternalLinkPolicy({ siteId, policy }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["external-link-policy", siteId] });
+      // Prefix match, so this reaches the paginated queue and the counts under
+      // it. A second line naming the counts separately was dead: they have
+      // never had a key of their own.
       void qc.invalidateQueries({ queryKey: ["suggestions"] });
-      void qc.invalidateQueries({ queryKey: ["suggestion-counts"] });
     },
   });
 };

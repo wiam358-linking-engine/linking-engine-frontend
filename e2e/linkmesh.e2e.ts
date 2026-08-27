@@ -52,6 +52,8 @@ interface SuggestionFixture {
   target_site_name: string;
   method: "hybrid_bm25";
   score: number;
+  /** What the queue orders on and the card shows; see the Suggestion type. */
+  rank_score: number;
   status: "pending" | "approved" | "applying";
   anchor_text: string;
   created_at: string;
@@ -453,6 +455,7 @@ test("an operator selects a suggestion, approves its exact edit, and queues publ
     target_site_name: "Editorial E2E",
     method: "hybrid_bm25",
     score: 0.86,
+    rank_score: 0.72,
     status: "pending",
     anchor_text: "internal linking guide",
     created_at: "2026-08-14T09:03:00Z",
@@ -461,6 +464,13 @@ test("an operator selects a suggestion, approves its exact edit, and queues publ
   await page.goto("/queue");
 
   await expect(page.getByRole("heading", { name: "Link suggestions", level: 1 })).toBeVisible();
+
+  // The card leads with the rank score, not the cosine similarity: on a real
+  // corpus cosine sits in a band a few points wide and separates almost nothing.
+  await expect(page.getByText("72%")).toBeVisible();
+  await expect(page.getByText("Rank score")).toBeVisible();
+  await expect(page.getByText("86%")).toBeHidden();
+
   await page
     .getByRole("button", {
       name: "Select suggestion from Editorial E2E: Source article to Target article",
@@ -468,7 +478,7 @@ test("an operator selects a suggestion, approves its exact edit, and queues publ
     .click();
 
   await expect.poll(() => apiState.reviewRequests).toEqual([{ id: 501, status: "approved" }]);
-  await page.getByRole("link", { name: "Open selected links" }).click();
+  await page.getByRole("link", { name: /Selected links/ }).click();
 
   // The selected-links page is a review inbox between the queue and publication,
   // so the batch reaches /publish through it rather than directly.
@@ -481,10 +491,15 @@ test("an operator selects a suggestion, approves its exact edit, and queues publ
   await expect(page.getByRole("heading", { name: "Approve exact edits", level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "Exact edit review" })).toBeVisible();
 
-  // Every exact change must be read before the batch can be approved, so the
-  // approve action only appears once nothing is left unread.
-  await expect(page.getByText("0 of 1 read")).toBeVisible();
-  await page.getByRole("button", { name: "Read the next change" }).click();
+  // Approval is not gated on opening each change one at a time. The guarantee
+  // is that nothing is hidden: every selected edit is already on the page, with
+  // the words that become the link marked in their own sentence, so the batch
+  // is approvable as soon as it is prepared.
+  await expect(
+    page.getByText("Read our internal linking guide for the full workflow."),
+  ).toBeVisible();
+  await expect(page.locator("mark", { hasText: "internal linking guide" })).toBeVisible();
+  await expect(page.getByText("Ready to approve")).toBeVisible();
 
   await expect(page.getByRole("button", { name: "Approve and queue 1 exact edit" })).toBeVisible();
 

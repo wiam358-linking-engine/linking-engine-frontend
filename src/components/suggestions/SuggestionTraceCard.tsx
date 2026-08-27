@@ -17,6 +17,8 @@ export interface SuggestionTraceState {
 interface Props {
   suggestion: Suggestion;
   trace: SuggestionTraceState;
+  /** Embedded previews keep provenance available without letting it lead the decision. */
+  collapsible?: boolean;
 }
 
 const EVENT_LABEL: Record<string, string> = {
@@ -194,7 +196,9 @@ function CitationNeedPanel({ evidence }: { evidence: CitationNeedEvidence }) {
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-caption-sm font-medium text-ink">Citation-needed sentence</span>
-        <span className="badge">{pct(evidence.confidence)} confidence</span>
+        <span className="badge">
+          {pct(evidence.confidence)} detector confidence; not factual confidence or target relevance
+        </span>
       </div>
       <blockquote className="mt-2 break-words border-l-2 border-primary/40 pl-3 text-body-sm leading-normal text-body">
         {evidence.sentence}
@@ -209,9 +213,9 @@ function CitationNeedPanel({ evidence }: { evidence: CitationNeedEvidence }) {
         </ul>
       )}
       <p className="mt-2 text-caption-sm leading-normal text-muted">
-        The local rule-based detector says this sentence should carry a source. Target
-        relevance is evaluated separately; this signal does not claim that the proposed page
-        proves the sentence.
+        The local rule-based detector says this sentence should carry a source. This detector
+        confidence is not factual confidence or target relevance; this signal does not claim that
+        the proposed page proves the sentence.
       </p>
       <p className="mt-1 text-caption-sm text-muted">
         Detector: {evidence.detector_version} &middot; Source offsets {evidence.start}–
@@ -271,8 +275,8 @@ function RankingEvidence({ suggestion }: { suggestion: Suggestion }) {
       </div>
       <p className="mt-1 text-caption-sm leading-normal text-body">
         {components?.final_order === "bm25_512"
-          ? "BM25-512 decides the delivered order after dense and lexical retrieval widen the candidate pool. Semantic match remains the separate cosine similarity shown above."
-          : `The delivered order uses ${finalOrder}. Semantic match remains the separate similarity score shown above.`}
+          ? "BM25-512 decides the delivered order after dense and lexical retrieval widen the candidate pool. BM25 has no ceiling, so this row's rank score falls back to its cosine similarity."
+          : `The delivered order uses ${finalOrder}. The rank score is that number as a share of the highest it could have reached; semantic match below is the separate cosine similarity.`}
       </p>
 
       <details className="mt-2">
@@ -393,7 +397,7 @@ const timingStat = (suggestion: Suggestion, events: SuggestionEvent[] | undefine
   };
 };
 
-export default function SuggestionTraceCard({ suggestion, trace }: Props) {
+export default function SuggestionTraceCard({ suggestion, trace, collapsible = false }: Props) {
   const bm25 = suggestion.score_components?.bm25_score;
   const externalTrust = suggestion.score_components?.external_trust;
   const externalSafety = suggestion.score_components?.external_safety;
@@ -402,8 +406,11 @@ export default function SuggestionTraceCard({ suggestion, trace }: Props) {
   const graph = suggestion.score_components?.graph;
   const timing = timingStat(suggestion, trace.data);
 
-  return (
-    <section aria-label="Suggestion traceability" className="card mb-5 mt-5 p-4">
+  const card = (
+    <section
+      aria-label="Suggestion traceability"
+      className={`card p-4 ${collapsible ? "" : "mb-5 mt-5"}`}
+    >
       <div className="eyebrow">Why this suggestion</div>
 
       <RankingEvidence suggestion={suggestion} />
@@ -413,6 +420,16 @@ export default function SuggestionTraceCard({ suggestion, trace }: Props) {
         role="group"
         className="mt-2 grid grid-cols-2 gap-2"
       >
+        <div className="rounded-lg bg-surface-strong px-3 py-2">
+          <dt className="text-caption-sm text-muted">Rank score</dt>
+          <dd className="mt-0.5 text-body-sm font-medium text-ink">
+            {pct(suggestion.rank_score)}
+          </dd>
+        </div>
+        {/* Kept beside the rank score rather than replaced by it. The two
+            disagree often — a row can be first in both retrieval pools and
+            still be an ordinary cosine match — and an editor deciding whether
+            to publish is entitled to see both readings. */}
         <div className="rounded-lg bg-surface-strong px-3 py-2">
           <dt className="text-caption-sm text-muted">Semantic match</dt>
           <dd className="mt-0.5 text-body-sm font-medium text-ink">
@@ -463,8 +480,11 @@ export default function SuggestionTraceCard({ suggestion, trace }: Props) {
         {citationNeed && (
           <div className="rounded-lg bg-surface-strong px-3 py-2">
             <dt className="text-caption-sm text-muted">Citation need</dt>
-            <dd className="mt-0.5 text-body-sm font-medium text-ink">
-              {pct(citationNeed.confidence)}
+            <dd
+              className="mt-0.5 text-body-sm font-medium text-ink"
+              title="Detector confidence; not factual confidence or target relevance"
+            >
+              <span>{pct(citationNeed.confidence)}</span> detector
             </dd>
           </div>
         )}
@@ -628,5 +648,39 @@ export default function SuggestionTraceCard({ suggestion, trace }: Props) {
         )}
       </div>
     </section>
+  );
+
+  if (!collapsible) return card;
+
+  return (
+    <details className="mt-5 border-t border-hairline pt-5">
+      <summary className="disclosure-summary flex items-start justify-between gap-3 text-left">
+        <span className="min-w-0">
+          <span className="block text-title-sm font-medium text-ink">Technical provenance</span>
+          <span className="mt-1 block text-caption leading-normal text-muted">
+            Ranking, safety, and lifecycle evidence.
+          </span>
+        </span>
+        <span
+          className="flex h-11 w-11 flex-none items-center justify-center rounded-pill bg-surface-strong text-muted"
+          title="View evidence"
+        >
+          <span className="sr-only">View evidence</span>
+          <svg
+            aria-hidden="true"
+            className="evidence-chevron h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+            viewBox="0 0 24 24"
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </summary>
+      <div className="mt-3">{card}</div>
+    </details>
   );
 }

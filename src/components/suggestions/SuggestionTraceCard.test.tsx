@@ -19,6 +19,7 @@ const suggestion: Suggestion = {
   target_site_name: "Example",
   method: "hybrid_bm25",
   score: 0.84,
+  rank_score: 0.61,
   score_components: { bm25_score: 12.4 },
   status: "approved",
   anchor_text: "anchor",
@@ -26,6 +27,24 @@ const suggestion: Suggestion = {
 };
 
 describe("SuggestionTraceCard", () => {
+  it("can keep technical provenance collapsed inside the detail panel", () => {
+    render(
+      <SuggestionTraceCard
+        suggestion={suggestion}
+        trace={{ data: [], isLoading: false, error: null, onRetry: vi.fn() }}
+        collapsible
+      />,
+    );
+
+    const details = screen.getByText("Technical provenance").closest("details");
+    expect(details?.open).toBe(false);
+
+    fireEvent.click(screen.getByText("Technical provenance"));
+
+    expect(details?.open).toBe(true);
+    expect(screen.getByRole("region", { name: "Suggestion traceability" })).not.toBeNull();
+  });
+
   it("renders useful statistics and newest lifecycle events", () => {
     render(
       <SuggestionTraceCard
@@ -120,7 +139,7 @@ describe("SuggestionTraceCard", () => {
     expect(screen.getByText("How the rank was decided")).not.toBeNull();
     expect(screen.getByText("Final rank #1")).not.toBeNull();
     expect(document.body.textContent).toContain(
-      "Semantic match remains the separate cosine similarity shown above.",
+      "BM25 has no ceiling, so this row's rank score falls back to its cosine similarity.",
     );
 
     const details = screen.getByText("Show ranking details").closest("details");

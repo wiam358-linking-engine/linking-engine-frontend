@@ -12,6 +12,10 @@ import type {
   EditorialRankingPolicyUpdate,
   ArticleImportResult,
   ArticleImportRow,
+  SiteArticle,
+  SiteSchedule,
+  SiteScheduleRunAccepted,
+  SiteScheduleUpdate,
 } from "../types/site";
 import type { JobAccepted } from "../types/job";
 import { ENGINE_PAGE_LIMIT } from "./engineLimits";
@@ -22,6 +26,13 @@ export const listSites = (offset = 0, search = "") =>
   api
     .get<Site[]>("/sites", {
       params: { limit: SITE_PAGE_SIZE, offset, search: search.trim() || undefined },
+    })
+    .then((response) => response.data);
+
+export const listSiteArticles = (siteId: number, offset = 0) =>
+  api
+    .get<SiteArticle[]>(`/sites/${siteId}/articles`, {
+      params: { limit: ENGINE_PAGE_LIMIT, offset },
     })
     .then((response) => response.data);
 
@@ -67,6 +78,23 @@ export const deleteSite = (id: number, confirmName: string) =>
 
 export const ingestSite = (id: number) =>
   api.post<JobAccepted>(`/sites/${id}/ingest`).then((r) => r.data);
+
+export const getSiteSchedule = (siteId: number) =>
+  api.get<SiteSchedule | null>(`/sites/${siteId}/schedule`).then((r) => r.data);
+
+export const updateSiteSchedule = ({
+  siteId,
+  schedule,
+}: {
+  siteId: number;
+  schedule: SiteScheduleUpdate;
+}) =>
+  api.put<SiteSchedule>(`/sites/${siteId}/schedule`, schedule).then((r) => r.data);
+
+export const runSiteScheduleNow = (siteId: number) =>
+  api
+    .post<SiteScheduleRunAccepted>(`/sites/${siteId}/schedule/run-now`)
+    .then((r) => r.data);
 
 export const importArticleRows = (
   siteId: number,
